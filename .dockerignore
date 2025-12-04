@@ -1,0 +1,11 @@
+node_modules
+src
+*.ts
+.env
+.env.*
+.git
+.gitignore
+*.md
+.claude
+.vscode
+tsconfig.json
