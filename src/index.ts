@@ -4,6 +4,9 @@ import { Command } from 'commander';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import dayjs from 'dayjs';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { getGroupwareBrowserService } from './services/groupware-browser.js';
 import {
   displayAvailability,
@@ -19,44 +22,172 @@ import { parseDate, parseTimeRange, formatDateDisplay } from './utils/date.js';
 import { validateConfig, TARGET_ROOMS, WORK_HOURS } from './config.js';
 import { CliOptions, TimeSlot, RoomAvailability } from './types/index.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/**
+ * 도움말 출력
+ */
+function showHelp(): void {
+  console.log(chalk.bold.cyan('\n🏢 회의실 예약 CLI (mr)\n'));
+  console.log(chalk.white('사용법:'));
+  console.log(chalk.gray('  mr              대화형 모드로 실행'));
+  console.log(chalk.gray('  mr 오늘         오늘 회의실 현황 조회'));
+  console.log(chalk.gray('  mr 내일         내일 회의실 현황 조회'));
+  console.log(chalk.gray('  mr 2025-12-10   특정 날짜 현황 조회'));
+  console.log(chalk.gray('  mr --setup      계정 설정 변경'));
+  console.log(chalk.gray('  mr --help       이 도움말 표시'));
+  console.log();
+  console.log(chalk.white('회의실 목록:'));
+  console.log(chalk.gray('  R2.1, R2.2              2층 회의실'));
+  console.log(chalk.gray('  R3.1, R3.2, R3.3, R3.5  3층 회의실'));
+  console.log();
+  console.log(chalk.white('예시:'));
+  console.log(chalk.gray('  mr              → 날짜 선택 → 회의실 선택 → 예약'));
+  console.log(chalk.gray('  mr 오늘         → 오늘 빈 회의실 바로 확인'));
+  console.log(chalk.gray('  mr today        → 영어도 가능'));
+  console.log();
+}
+
+/**
+ * .env 파일 경로 찾기
+ */
+function getEnvPath(): string {
+  // 설치 디렉토리 또는 현재 디렉토리
+  const installDir = path.resolve(__dirname, '..');
+  return path.join(installDir, '.env');
+}
+
+/**
+ * 초기 설정 마법사
+ */
+async function runSetup(): Promise<boolean> {
+  console.log(chalk.bold.cyan('\n🏢 회의실 예약 시스템 - 초기 설정\n'));
+  console.log(chalk.gray('그룹웨어(gw.rsquare.co.kr) 로그인 정보를 입력하세요.\n'));
+
+  const answers = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'userId',
+      message: '그룹웨어 아이디:',
+      validate: (input) => input.trim() ? true : '아이디를 입력하세요',
+    },
+    {
+      type: 'password',
+      name: 'password',
+      message: '비밀번호:',
+      mask: '*',
+      validate: (input) => input.trim() ? true : '비밀번호를 입력하세요',
+    },
+  ]);
+
+  // .env 파일 저장
+  const envPath = getEnvPath();
+  const envContent = `# 그룹웨어 로그인 정보
+GW_USER_ID=${answers.userId}
+GW_PASSWORD=${answers.password}
+`;
+
+  try {
+    fs.writeFileSync(envPath, envContent, 'utf-8');
+    console.log(chalk.green('\n✅ 설정이 저장되었습니다!'));
+    console.log(chalk.gray(`   저장 위치: ${envPath}\n`));
+
+    // 환경변수 다시 로드
+    process.env.GW_USER_ID = answers.userId;
+    process.env.GW_PASSWORD = answers.password;
+
+    return true;
+  } catch (error) {
+    showError('설정 저장에 실패했습니다.');
+    return false;
+  }
+}
+
+/**
+ * 설정이 필요한지 확인
+ */
+function needsSetup(): boolean {
+  const envPath = getEnvPath();
+
+  // .env 파일이 없으면 설정 필요
+  if (!fs.existsSync(envPath)) {
+    return true;
+  }
+
+  // .env 파일이 있어도 값이 없으면 설정 필요
+  const config = validateConfig();
+  return !config.valid;
+}
+
 const program = new Command();
 
 program
-  .name('meeting-room')
-  .description('회의실 예약 자동화 CLI - 그룹웨어 예약 및 Google Calendar 연동')
-  .version('1.0.0');
-
-program
-  .option('-c, --check <date>', '빈 회의실 조회 (today, tomorrow, YYYY-MM-DD)')
-  .option('-d, --date <date>', '예약 날짜 (today, tomorrow, YYYY-MM-DD)')
+  .name('mr')
+  .description('회의실 예약 CLI - 그룹웨어 회의실 현황 조회 및 예약')
+  .version('1.0.0')
+  .argument('[date]', '조회할 날짜 (오늘, 내일, today, tomorrow, YYYY-MM-DD)')
+  .option('-c, --check <date>', '빈 회의실 조회 (하위 호환)')
+  .option('-d, --date <date>', '예약 날짜')
   .option('-t, --time <range>', '시간 범위 (예: 10:00-11:00)')
   .option('-r, --room <name>', '회의실 이름 (예: R3.1)')
   .option('--title <title>', '예약명')
   .option('--content <content>', '예약 내용')
-  .option('--calendar', 'Google Calendar에 등록')
-  .option('--headless', '브라우저 창 숨기기 (서버 모드)');
+  .option('--calendar', 'Google Calendar에 등록 (예정)')
+  .option('--headless', '브라우저 창 숨기기')
+  .option('--setup', '계정 설정')
+  .helpOption('-h, --help', '도움말 표시')
+  .addHelpCommand(false);
+
+// 커스텀 도움말
+program.on('--help', () => {
+  showHelp();
+});
 
 program.parse();
 
-const options = program.opts<CliOptions>();
+const options = program.opts<CliOptions & { setup?: boolean }>();
+const args = program.args;
 
 async function main() {
+  // --help 처리
+  if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    showHelp();
+    process.exit(0);
+  }
+
+  // --setup 처리
+  if (options.setup) {
+    await runSetup();
+    process.exit(0);
+  }
+
+  // 초기 설정 필요 여부 확인
+  if (needsSetup()) {
+    console.log(chalk.yellow('\n⚠️  초기 설정이 필요합니다.\n'));
+    const setupSuccess = await runSetup();
+    if (!setupSuccess) {
+      process.exit(1);
+    }
+  }
+
   console.log(chalk.bold.cyan('\n🏢 회의실 예약 시스템\n'));
 
-  // 설정 검증
+  // 설정 검증 (설정 후 다시 확인)
   const configValidation = validateConfig();
   if (!configValidation.valid) {
     showError('설정 오류:');
     configValidation.errors.forEach((err) => console.log(chalk.red(`  - ${err}`)));
-    console.log(chalk.gray('\n.env 파일에 GW_USER_ID와 GW_PASSWORD를 설정하세요.'));
+    console.log(chalk.gray('\nmr --setup 명령으로 계정을 설정하세요.'));
     process.exit(1);
   }
 
   // 그룹웨어 로그인 (브라우저 기반)
   const gw = getGroupwareBrowserService();
 
-  // headless 모드 설정
-  if (options.headless) {
+  // headless 모드 기본 활성화 (bin/mr에서 실행 시)
+  // 환경변수 또는 옵션으로 headless 설정
+  if (options.headless || process.env.MR_HEADLESS === 'true') {
     gw.setHeadless(true);
   }
 
@@ -65,15 +196,25 @@ async function main() {
 
   if (!loginSuccess) {
     showError('그룹웨어 로그인에 실패했습니다.');
+    console.log(chalk.gray('아이디/비밀번호를 확인하세요: mr --setup'));
     process.exit(1);
   }
 
-  // 명령줄 옵션 처리
-  if (options.check) {
+  // 위치 인자로 날짜가 전달된 경우 (mr 오늘, mr 내일, mr 2025-12-10)
+  if (args.length > 0) {
+    const dateArg = args[0];
+    await handleCheck(gw, { ...options, check: dateArg });
+  }
+  // --check 옵션 (하위 호환)
+  else if (options.check) {
     await handleCheck(gw, options);
-  } else if (options.date && options.time && options.room && options.title) {
+  }
+  // 직접 예약 모드
+  else if (options.date && options.time && options.room && options.title) {
     await handleDirectReservation(gw, options);
-  } else {
+  }
+  // 대화형 모드
+  else {
     await handleInteractiveMode(gw);
   }
 }
