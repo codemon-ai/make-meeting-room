@@ -70,6 +70,7 @@ npm start -- --check today --headless  # 실행
 #### 도움말
 ```
 @봇 회의실 도움말
+@봇 회의실 사용법
 @봇 회의실 help
 ```
 
@@ -90,10 +91,26 @@ npm start -- --check today --headless  # 실행
 
 ```bash
 # PM2로 실행
-pm2 start npm --name "mr-slack" -- run slack
+pm2 start npm --name "mr-slack" -- run start:slack
 
 # 로그 확인
 pm2 logs mr-slack
+
+# 재시작
+pm2 restart mr-slack
+```
+
+### 서버 환경 (coffeemon@222.235.28.15)
+
+```bash
+# node/npm PATH 설정 필요
+export PATH=/usr/local/bin:$PATH
+
+# 배포
+cd /Users/coffeemon/workspace/make-meeting-room
+git pull
+npm run build
+pm2 restart mr-slack
 ```
 
 ### 필요 환경변수

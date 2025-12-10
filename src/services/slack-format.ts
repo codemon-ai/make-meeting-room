@@ -80,25 +80,14 @@ function formatRoomStatus(avail: RoomAvailability): string {
     return lines.join('\n');
   }
 
-  // 시간대별 상태 생성
+  // 시간대별 상태 생성 (각 슬롯 한 줄씩)
   const timeSlots = generateTimelineSlots(avail);
-  const statusParts: string[] = [];
 
   for (const slot of timeSlots) {
     if (slot.available) {
-      statusParts.push(`✅ ${slot.start}-${slot.end}`);
+      lines.push(`✅ ${slot.start}-${slot.end}`);
     } else {
-      statusParts.push(`❌ ${slot.start}-${slot.end} _${slot.reserverName}_`);
-    }
-  }
-
-  // 한 줄에 표시 (긴 경우 줄바꿈)
-  if (statusParts.length <= 3) {
-    lines.push(statusParts.join(' | '));
-  } else {
-    // 여러 줄로 나눔
-    for (let i = 0; i < statusParts.length; i += 3) {
-      lines.push(statusParts.slice(i, i + 3).join(' | '));
+      lines.push(`❌ ${slot.start}-${slot.end} _${slot.reserverName}_`);
     }
   }
 

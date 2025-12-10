@@ -64,7 +64,7 @@ function parseCommand(text: string): ParsedCommand {
   }
 
   // 도움말
-  if (cleanText.includes('도움말') || cleanText.includes('help') || cleanText.includes('?')) {
+  if (cleanText.includes('도움말') || cleanText.includes('사용법') || cleanText.includes('help') || cleanText.includes('?')) {
     return { type: 'help' };
   }
 
