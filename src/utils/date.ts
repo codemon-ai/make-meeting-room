@@ -3,15 +3,24 @@ import { TimeSlot } from '../types/index.js';
 import { WORK_HOURS, TIME_SLOT_INTERVAL } from '../config.js';
 
 /**
- * 날짜 문자열 파싱 (today, tomorrow, YYYY-MM-DD)
+ * 날짜 문자열 파싱 (today, tomorrow, 오늘, 내일, YYYY-MM-DD)
  */
 export function parseDate(dateStr: string): string {
   const lower = dateStr.toLowerCase();
 
+  // 영어
   if (lower === 'today') {
     return dayjs().format('YYYY-MM-DD');
   }
   if (lower === 'tomorrow') {
+    return dayjs().add(1, 'day').format('YYYY-MM-DD');
+  }
+
+  // 한글
+  if (dateStr === '오늘') {
+    return dayjs().format('YYYY-MM-DD');
+  }
+  if (dateStr === '내일') {
     return dayjs().add(1, 'day').format('YYYY-MM-DD');
   }
 
