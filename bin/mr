@@ -1,0 +1,17 @@
+#!/bin/bash
+# 회의실 예약 CLI 실행 래퍼
+
+INSTALL_DIR="$HOME/.mr-meeting-room"
+
+# 설치 디렉토리가 없으면 현재 스크립트 위치 기준으로 찾기
+if [ ! -d "$INSTALL_DIR" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
+fi
+
+# headless 모드 기본 활성화
+export MR_HEADLESS=true
+
+# Node.js로 실행
+cd "$INSTALL_DIR"
+node dist/index.js "$@"
