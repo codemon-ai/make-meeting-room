@@ -113,6 +113,80 @@ src/
 └── slack-server.ts             # Slack Bot 서버 (예정)
 ```
 
+## Slack Bot (PM2 운영)
+
+### 1. 설치
+
+```bash
+# 레포 클론
+git clone https://github.com/codemon-ai/make-meeting-room.git
+cd make-meeting-room
+
+# 의존성 설치
+npm install
+npx playwright install chromium
+
+# 빌드
+npm run build
+
+# PM2 전역 설치
+npm install -g pm2
+```
+
+### 2. 환경 설정
+
+`.env` 파일 생성:
+
+```env
+# 그룹웨어 로그인
+GW_USER_ID=your_user_id
+GW_PASSWORD=your_password
+
+# Slack Bot (https://api.slack.com/apps 에서 생성)
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_SIGNING_SECRET=...
+SLACK_APP_TOKEN=xapp-...
+```
+
+### 3. PM2로 실행
+
+```bash
+# Slack Bot 시작
+pm2 start npm --name "mr-slack" -- run slack
+
+# 상태 확인
+pm2 status
+
+# 로그 확인
+pm2 logs mr-slack
+
+# 재시작
+pm2 restart mr-slack
+
+# 중지
+pm2 stop mr-slack
+
+# 삭제
+pm2 delete mr-slack
+```
+
+### 4. 부팅 시 자동 시작 (선택)
+
+```bash
+pm2 startup
+pm2 save
+```
+
+### 5. Slack Bot 사용법
+
+```
+@봇 회의실 오늘                           # 오늘 현황
+@봇 회의실 251210                         # 특정 날짜 현황
+@봇 회의실 예약 251210 1000 R3.1 1        # 예약 (1시간)
+@봇 회의실 예약 251210 1000 R3.1 0.5 "팀 미팅"  # 예약명 지정
+@봇 회의실 도움말                         # 도움말
+```
+
 ## 기술 스택
 
 - Node.js + TypeScript
@@ -120,3 +194,4 @@ src/
 - Commander.js (CLI 파서)
 - Inquirer.js (대화형 프롬프트)
 - Chalk (터미널 색상)
+- Slack Bolt (Slack Bot)
