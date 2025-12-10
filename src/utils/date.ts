@@ -3,7 +3,7 @@ import { TimeSlot } from '../types/index.js';
 import { WORK_HOURS, TIME_SLOT_INTERVAL } from '../config.js';
 
 /**
- * 날짜 문자열 파싱 (today, tomorrow, 오늘, 내일, YYYY-MM-DD)
+ * 날짜 문자열 파싱 (today, tomorrow, 오늘, 내일, YYMMDD, YYYY-MM-DD)
  */
 export function parseDate(dateStr: string): string {
   const lower = dateStr.toLowerCase();
@@ -24,13 +24,82 @@ export function parseDate(dateStr: string): string {
     return dayjs().add(1, 'day').format('YYYY-MM-DD');
   }
 
+  // 단축 형식 (YYMMDD): 251210 -> 2025-12-10
+  if (/^\d{6}$/.test(dateStr)) {
+    return parseShortDate(dateStr);
+  }
+
   // YYYY-MM-DD 형식 검증
   const parsed = dayjs(dateStr, 'YYYY-MM-DD', true);
   if (!parsed.isValid()) {
-    throw new Error(`잘못된 날짜 형식입니다: ${dateStr}. YYYY-MM-DD 형식을 사용하세요.`);
+    throw new Error(`잘못된 날짜 형식입니다: ${dateStr}. YYYY-MM-DD 또는 YYMMDD 형식을 사용하세요.`);
   }
 
   return parsed.format('YYYY-MM-DD');
+}
+
+/**
+ * 단축 날짜 파싱 (YYMMDD -> YYYY-MM-DD)
+ * 예: 251210 -> 2025-12-10
+ */
+export function parseShortDate(shortDate: string): string {
+  if (!/^\d{6}$/.test(shortDate)) {
+    throw new Error(`잘못된 날짜 형식입니다: ${shortDate}. YYMMDD 형식을 사용하세요.`);
+  }
+
+  const yy = shortDate.substring(0, 2);
+  const mm = shortDate.substring(2, 4);
+  const dd = shortDate.substring(4, 6);
+
+  // 20XX년 가정
+  const fullDate = `20${yy}-${mm}-${dd}`;
+  const parsed = dayjs(fullDate, 'YYYY-MM-DD', true);
+
+  if (!parsed.isValid()) {
+    throw new Error(`잘못된 날짜입니다: ${shortDate}`);
+  }
+
+  return parsed.format('YYYY-MM-DD');
+}
+
+/**
+ * 단축 시간 파싱 (HHMM -> HH:MM)
+ * 예: 1000 -> 10:00, 0930 -> 09:30
+ */
+export function parseShortTime(shortTime: string): string {
+  if (!/^\d{4}$/.test(shortTime)) {
+    throw new Error(`잘못된 시간 형식입니다: ${shortTime}. HHMM 형식(4자리)을 사용하세요.`);
+  }
+
+  const hh = shortTime.substring(0, 2);
+  const mm = shortTime.substring(2, 4);
+
+  const hours = parseInt(hh, 10);
+  const minutes = parseInt(mm, 10);
+
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    throw new Error(`잘못된 시간입니다: ${shortTime}`);
+  }
+
+  return `${hh}:${mm}`;
+}
+
+/**
+ * 종료 시간 계산 (시작시간 + 러닝타임)
+ * @param startTime 시작 시간 (HH:MM)
+ * @param durationHours 러닝타임 (시간 단위, 0.5 = 30분)
+ * @returns 종료 시간 (HH:MM)
+ */
+export function calculateEndTime(startTime: string, durationHours: number): string {
+  const startMinutes = timeToMinutes(startTime);
+  const durationMinutes = Math.round(durationHours * 60);
+  const endMinutes = startMinutes + durationMinutes;
+
+  if (endMinutes > 24 * 60) {
+    throw new Error('종료 시간이 자정을 넘을 수 없습니다.');
+  }
+
+  return minutesToTime(endMinutes);
 }
 
 /**
