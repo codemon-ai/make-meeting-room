@@ -196,3 +196,54 @@ export function formatSlackText(availabilities: RoomAvailability[], date: string
 
   return lines.join('\n');
 }
+
+/**
+ * 예약 성공 메시지 포맷
+ */
+export function formatReservationSuccess(
+  roomName: string,
+  floor: string,
+  date: string,
+  startTime: string,
+  endTime: string,
+  title: string
+): string {
+  return [
+    '✅ *예약 완료!*',
+    '',
+    `   회의실: ${roomName} (${floor})`,
+    `   일시: ${formatDateDisplay(date)} ${startTime} - ${endTime}`,
+    `   예약명: ${title}`,
+  ].join('\n');
+}
+
+/**
+ * 예약 실패 메시지 포맷
+ */
+export function formatReservationError(message: string): string {
+  return `❌ *예약 실패*\n\n   ${message}`;
+}
+
+/**
+ * 도움말 메시지 포맷
+ */
+export function formatHelpMessage(): string {
+  return [
+    '*🏢 회의실 예약 봇 사용법*',
+    '',
+    '*조회*',
+    '`@봇 회의실 오늘` - 오늘 현황',
+    '`@봇 회의실 내일` - 내일 현황',
+    '`@봇 회의실 251210` - 2025-12-10 현황',
+    '`@봇 회의실 251210 1000` - 해당일 10:00 기준 현황',
+    '',
+    '*예약*',
+    '`@봇 회의실 예약 251210 1000 R3.1 1` - 10:00~11:00 (1시간)',
+    '`@봇 회의실 예약 251210 1000 R3.1 0.5` - 10:00~10:30 (30분)',
+    '`@봇 회의실 예약 251210 1000 R3.1 1 "팀 미팅"` - 예약명 지정',
+    '',
+    '*러닝타임*: 0.5(30분), 1(1시간), 1.5(1시간30분), 2(2시간)...',
+    '*시간 형식*: 4자리 (0930, 1000, 1430)',
+    '*날짜 형식*: 6자리 (251210) 또는 오늘/내일',
+  ].join('\n');
+}
