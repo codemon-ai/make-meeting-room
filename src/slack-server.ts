@@ -7,8 +7,17 @@ import {
   formatReservationSuccess,
   formatReservationError,
   formatHelpMessage,
+  formatScheduleSuccess,
+  formatScheduleError,
 } from './services/slack-format.js';
 import { SLACK_CONFIG, validateConfig, TARGET_ROOMS } from './config.js';
+import {
+  initGoogleCalendar,
+  isCalendarEnabled,
+  createCalendarEvent,
+  getEmailsFromSlackMentions,
+  extractSlackMentions,
+} from './services/google-calendar.js';
 
 // Slack Bolt 앱 초기화
 const app = new App({
@@ -29,12 +38,13 @@ gw.setHeadless(true);
  * 명령어 파싱 결과 타입
  */
 interface ParsedCommand {
-  type: 'check' | 'reserve' | 'help' | 'unknown';
+  type: 'check' | 'reserve' | 'schedule' | 'help' | 'unknown';
   date?: string;
   time?: string;
   room?: string;
   duration?: number;
   title?: string;
+  attendeeIds?: string[]; // Slack 사용자 ID 배열
   error?: string;
 }
 
@@ -46,30 +56,68 @@ interface ParsedCommand {
  * - @봇 회의실 251210
  * - @봇 회의실 251210 1000
  *
- * 예약:
+ * 예약 (+ 캘린더):
  * - @봇 회의실 예약 251210 1000 R3.1 1
- * - @봇 회의실 예약 251210 1000 R3.1 0.5 "팀 미팅"
+ * - @봇 회의실 예약 251210 1000 R3.1 0.5 "팀 미팅" @user1 @user2
+ *
+ * 일정 (캘린더만):
+ * - @봇 일정 251210 1000 1 "주간 회의" @user1 @user2
  *
  * 도움말:
  * - @봇 회의실 도움말
  * - @봇 회의실 help
  */
 function parseCommand(text: string): ParsedCommand {
+  // @멘션 추출 (첫 번째는 봇)
+  const attendeeIds = extractSlackMentions(text);
+
   // 봇 멘션 제거 (예: <@U12345> 회의실 ...)
   const cleanText = text.replace(/<@[A-Z0-9]+>/gi, '').trim();
-
-  // "회의실" 키워드가 없으면 unknown
-  if (!cleanText.includes('회의실')) {
-    return { type: 'unknown' };
-  }
 
   // 도움말
   if (cleanText.includes('도움말') || cleanText.includes('사용법') || cleanText.includes('help') || cleanText.includes('?')) {
     return { type: 'help' };
   }
 
+  // 일정 명령어 파싱 (캘린더만)
+  // 형식: 일정 251210 1000 1 "회의명" [@user1 @user2]
+  const scheduleMatch = cleanText.match(
+    /일정\s+(\S+)\s+(\d{4})\s+([\d.]+)\s+[""]([^""]+)[""]/i
+  );
+
+  if (scheduleMatch) {
+    const [, dateInput, timeInput, durationStr, title] = scheduleMatch;
+
+    try {
+      const date = parseDate(dateInput);
+      const startTime = parseShortTime(timeInput);
+      const duration = parseFloat(durationStr);
+
+      if (duration < 0.5 || duration > 8) {
+        return { type: 'schedule', error: '러닝타임은 0.5~8시간 범위로 입력하세요.' };
+      }
+
+      return {
+        type: 'schedule',
+        date,
+        time: startTime,
+        duration,
+        title,
+        attendeeIds,
+      };
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : '입력 형식 오류';
+      return { type: 'schedule', error: errorMsg };
+    }
+  }
+
+  // "회의실" 또는 "일정" 키워드가 없으면 unknown
+  if (!cleanText.includes('회의실') && !cleanText.includes('일정')) {
+    return { type: 'unknown' };
+  }
+
   // 예약 명령어 파싱
-  // 형식: 회의실 예약 251210 1000 R3.1 1 "예약명"
+  // 형식: 회의실 예약 251210 1000 R3.1 1 "예약명" [@user1 @user2]
   const reserveMatch = cleanText.match(
     /회의실\s+예약\s+(\S+)\s+(\d{4})\s+(R\d\.\d)\s+([\d.]+)(?:\s+[""]([^""]+)[""])?/i
   );
@@ -105,6 +153,7 @@ function parseCommand(text: string): ParsedCommand {
         room: room.toUpperCase(),
         duration,
         title,
+        attendeeIds,
       };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : '입력 형식 오류';
@@ -123,7 +172,7 @@ function parseCommand(text: string): ParsedCommand {
     if (dateInput === '예약') {
       return {
         type: 'reserve',
-        error: '예약 형식: @봇 회의실 예약 251210 1000 R3.1 1',
+        error: '예약 형식: @봇 회의실 예약 251210 1000 R3.1 1 "예약명"',
       };
     }
 
@@ -180,19 +229,21 @@ app.event('app_mention', async ({ event, client, say }) => {
     return;
   }
 
+  // Slack 사용자 정보 가져오기 (예약명 기본값용, 캘린더 organizer용)
+  let userName = '사용자';
+  let userEmail = '';
+  if (event.user) {
+    try {
+      const userInfo = await client.users.info({ user: event.user });
+      userName = userInfo.user?.real_name || userInfo.user?.name || '사용자';
+      userEmail = userInfo.user?.profile?.email || '';
+    } catch {
+      // 사용자 정보 조회 실패 시 기본값 사용
+    }
+  }
+
   // 예약 명령
   if (command.type === 'reserve' && command.date && command.time && command.room && command.duration) {
-    // Slack 사용자 정보 가져오기 (예약명 기본값용)
-    let userName = '사용자';
-    if (event.user) {
-      try {
-        const userInfo = await client.users.info({ user: event.user });
-        userName = userInfo.user?.real_name || userInfo.user?.name || '사용자';
-      } catch {
-        // 사용자 정보 조회 실패 시 기본값 사용
-      }
-    }
-
     const title = command.title || `${userName} 미팅`;
 
     await handleReserve(
@@ -204,7 +255,26 @@ app.event('app_mention', async ({ event, client, say }) => {
       command.time,
       command.room,
       command.duration,
-      title
+      title,
+      userEmail,
+      command.attendeeIds || []
+    );
+    return;
+  }
+
+  // 일정 명령 (캘린더만)
+  if (command.type === 'schedule' && command.date && command.time && command.duration && command.title) {
+    await handleSchedule(
+      event.channel,
+      threadTs,
+      client,
+      say,
+      command.date,
+      command.time,
+      command.duration,
+      command.title,
+      userEmail,
+      command.attendeeIds || []
     );
     return;
   }
@@ -283,7 +353,9 @@ async function handleReserve(
   startTime: string,
   roomName: string,
   duration: number,
-  title: string
+  title: string,
+  organizerEmail: string,
+  attendeeIds: string[]
 ) {
   const endTime = calculateEndTime(startTime, duration);
 
@@ -348,15 +420,42 @@ async function handleReserve(
       toTime: endTime,
     });
 
-    if (result.success) {
-      await client.chat.update({
-        channel,
-        ts: loadingMsg.ts!,
-        text: formatReservationSuccess(roomName, floor, date, startTime, endTime, title),
-      });
-    } else {
+    if (!result.success) {
       throw new Error(result.message);
     }
+
+    // 예약 성공 메시지
+    let successMessage = formatReservationSuccess(roomName, floor, date, startTime, endTime, title);
+
+    // Google Calendar 일정 생성 (설정된 경우)
+    if (isCalendarEnabled() && organizerEmail) {
+      const attendeeEmails = await getEmailsFromSlackMentions(client, attendeeIds);
+
+      const calendarResult = await createCalendarEvent(organizerEmail, {
+        title: `[${roomName}] ${title}`,
+        description: `회의실: ${roomName} (${floor})\n그룹웨어 예약 완료`,
+        date,
+        startTime,
+        endTime,
+        location: `${roomName} (${floor})`,
+        attendees: attendeeEmails,
+      });
+
+      if (calendarResult.success) {
+        successMessage += `\n\n📅 Google Calendar 일정 생성 완료`;
+        if (attendeeEmails.length > 0) {
+          successMessage += `\n   초대: ${attendeeEmails.join(', ')}`;
+        }
+      } else {
+        successMessage += `\n\n⚠️ 캘린더 일정 생성 실패: ${calendarResult.message}`;
+      }
+    }
+
+    await client.chat.update({
+      channel,
+      ts: loadingMsg.ts!,
+      text: successMessage,
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
     console.error('회의실 예약 오류:', errorMessage);
@@ -365,6 +464,71 @@ async function handleReserve(
       channel,
       ts: loadingMsg.ts!,
       text: formatReservationError(errorMessage),
+    });
+  }
+}
+
+/**
+ * 캘린더 일정 생성 핸들러 (회의실 없이)
+ */
+async function handleSchedule(
+  channel: string,
+  threadTs: string,
+  client: typeof app.client,
+  say: (args: { text: string; thread_ts: string }) => Promise<{ ts?: string }>,
+  date: string,
+  startTime: string,
+  duration: number,
+  title: string,
+  organizerEmail: string,
+  attendeeIds: string[]
+) {
+  const endTime = calculateEndTime(startTime, duration);
+
+  // 즉시 "일정 생성 중" 메시지 전송
+  const loadingMsg = await say({
+    text: `📅 일정 생성 중... (${formatDateDisplay(date)} ${startTime}-${endTime})`,
+    thread_ts: threadTs,
+  });
+
+  try {
+    if (!isCalendarEnabled()) {
+      throw new Error('Google Calendar가 설정되지 않았습니다.');
+    }
+
+    if (!organizerEmail) {
+      throw new Error('사용자 이메일을 조회할 수 없습니다.');
+    }
+
+    // 참석자 이메일 조회
+    const attendeeEmails = await getEmailsFromSlackMentions(client, attendeeIds);
+
+    // 캘린더 일정 생성
+    const calendarResult = await createCalendarEvent(organizerEmail, {
+      title,
+      date,
+      startTime,
+      endTime,
+      attendees: attendeeEmails,
+    });
+
+    if (!calendarResult.success) {
+      throw new Error(calendarResult.message);
+    }
+
+    await client.chat.update({
+      channel,
+      ts: loadingMsg.ts!,
+      text: formatScheduleSuccess(date, startTime, endTime, title, attendeeEmails),
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+    console.error('일정 생성 오류:', errorMessage);
+
+    await client.chat.update({
+      channel,
+      ts: loadingMsg.ts!,
+      text: formatScheduleError(errorMessage),
     });
   }
 }
@@ -431,6 +595,14 @@ async function main(): Promise<void> {
   const loginSuccess = await initGroupware();
   if (!loginSuccess) {
     console.error('❌ 그룹웨어 초기 로그인 실패. 서버를 계속 시작합니다.');
+  }
+
+  // Google Calendar 초기화
+  const calendarEnabled = await initGoogleCalendar();
+  if (calendarEnabled) {
+    console.log('📅 Google Calendar 연동 활성화');
+  } else {
+    console.log('📅 Google Calendar 연동 비활성화 (설정 없음)');
   }
 
   // 세션 유지 타이머 시작

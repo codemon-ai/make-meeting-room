@@ -195,15 +195,29 @@ export function formatReservationSuccess(
   date: string,
   startTime: string,
   endTime: string,
-  title: string
+  title: string,
+  calendarInfo?: { eventLink?: string; attendeeCount?: number }
 ): string {
-  return [
+  const lines = [
     '✅ *예약 완료!*',
     '',
     `   회의실: ${roomName} (${floor})`,
     `   일시: ${formatDateDisplay(date)} ${startTime} - ${endTime}`,
     `   예약명: ${title}`,
-  ].join('\n');
+  ];
+
+  if (calendarInfo) {
+    lines.push('');
+    lines.push('📅 *캘린더 일정 생성됨*');
+    if (calendarInfo.attendeeCount && calendarInfo.attendeeCount > 0) {
+      lines.push(`   참석자 ${calendarInfo.attendeeCount}명에게 초대 발송`);
+    }
+    if (calendarInfo.eventLink) {
+      lines.push(`   <${calendarInfo.eventLink}|캘린더에서 보기>`);
+    }
+  }
+
+  return lines.join('\n');
 }
 
 /**
@@ -211,6 +225,43 @@ export function formatReservationSuccess(
  */
 export function formatReservationError(message: string): string {
   return `❌ *예약 실패*\n\n   ${message}`;
+}
+
+/**
+ * 일정 생성 성공 메시지 포맷 (캘린더만)
+ */
+export function formatScheduleSuccess(
+  date: string,
+  startTime: string,
+  endTime: string,
+  title: string,
+  attendeeEmails: string[],
+  eventLink?: string
+): string {
+  const lines = [
+    '✅ *일정 생성 완료!*',
+    '',
+    `   일시: ${formatDateDisplay(date)} ${startTime} - ${endTime}`,
+    `   제목: ${title}`,
+  ];
+
+  if (attendeeEmails.length > 0) {
+    lines.push(`   참석자: ${attendeeEmails.length}명에게 초대 발송`);
+  }
+
+  if (eventLink) {
+    lines.push('');
+    lines.push(`📅 <${eventLink}|캘린더에서 보기>`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * 일정 생성 실패 메시지 포맷 (캘린더만)
+ */
+export function formatScheduleError(message: string): string {
+  return `❌ *일정 생성 실패*\n\n   ${message}`;
 }
 
 /**
@@ -226,10 +277,13 @@ export function formatHelpMessage(): string {
     '`@봇 회의실 251210` - 2025-12-10 현황',
     '`@봇 회의실 251210 1000` - 해당일 10:00 기준 현황',
     '',
-    '*예약*',
+    '*예약* (회의실 + 캘린더 초대)',
     '`@봇 회의실 예약 251210 1000 R3.1 1` - 10:00~11:00 (1시간)',
-    '`@봇 회의실 예약 251210 1000 R3.1 0.5` - 10:00~10:30 (30분)',
     '`@봇 회의실 예약 251210 1000 R3.1 1 "팀 미팅"` - 예약명 지정',
+    '`@봇 회의실 예약 251210 1000 R3.1 1 "팀 미팅" @user1 @user2` - 참석자 초대',
+    '',
+    '*일정* (캘린더만, 회의실 없음)',
+    '`@봇 일정 251210 1000 1 "주간 회의" @user1 @user2`',
     '',
     '*러닝타임*: 0.5(30분), 1(1시간), 1.5(1시간30분), 2(2시간)...',
     '*시간 형식*: 4자리 (0930, 1000, 1430)',
