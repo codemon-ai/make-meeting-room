@@ -121,11 +121,42 @@ SLACK_SIGNING_SECRET=...
 SLACK_APP_TOKEN=xapp-...
 ```
 
-## 예정된 작업
+## Google Calendar 연동
 
-### Google Calendar 연동
-- `--calendar` 옵션으로 예약 시 Google Calendar에 자동 등록
-- OAuth2 인증 필요 (credentials.json, token.json)
+### 기능
+- 회의실 예약 시 Google Calendar 일정 자동 생성 + 참석자 초대
+- 회의실 없이 캘린더 일정만 생성 가능
+
+### 명령어
+```
+# 회의실 예약 + 캘린더 초대
+@봇 회의실 예약 251210 1000 R3.1 1 "팀 미팅" @user1 @user2
+
+# 캘린더만 (회의실 없음)
+@봇 일정 251210 1000 1 "주간 회의" @user1 @user2
+```
+
+### 인증: Service Account + 도메인 전체 위임
+- `keys/rsquare.co.kr_rsquare-74c13e34d255.json` - Service Account 키
+- Slack 멘션 → Slack API로 이메일 조회 → Google Calendar attendees
+
+### 환경변수
+```
+GOOGLE_SERVICE_ACCOUNT_EMAIL=rtb-team@rsquare.rsquare.co.kr.iam.gserviceaccount.com
+GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+GOOGLE_CALENDAR_USER=yong150@rsquare.co.kr
+```
+
+### Google Admin Console 설정 (필수)
+1. admin.google.com > 보안 > API 제어 > 도메인 전체 위임
+2. 클라이언트 ID: `106465973951455423387`
+3. OAuth 범위: `https://www.googleapis.com/auth/calendar`
+
+### 관련 파일
+- `src/services/google-calendar.ts` - Calendar API 연동
+- `src/slack-server.ts` - 일정 명령어 파싱, @멘션 처리
+
+## 예정된 작업
 
 ### Public 배포
 - 레포 public 전환 후 curl 설치 가능
