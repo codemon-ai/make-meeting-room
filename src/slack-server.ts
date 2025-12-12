@@ -585,37 +585,29 @@ async function handleRTBQuestion(
 
     const answer = response.data?.answer || '답변을 생성할 수 없습니다.';
 
-    // Slack 메시지 길이 제한 (3000자로 안전하게)
-    const MAX_LENGTH = 3000;
+    // Slack 메시지 길이 제한 (2000자로 안전하게)
+    const MAX_LENGTH = 2000;
 
-    if (answer.length <= MAX_LENGTH) {
-      // 짧은 답변: 기존 메시지 업데이트
-      await client.chat.update({
-        channel,
-        ts: loadingMsg.ts!,
-        text: answer,
+    // 긴 답변: 분할해서 전송
+    const chunks = splitMessage(answer, MAX_LENGTH);
+    console.log(`[RTB] 답변 길이: ${answer.length}자, 청크 수: ${chunks.length}, 첫 청크: ${chunks[0].length}자`);
+
+    // 첫 번째 청크로 로딩 메시지 업데이트
+    await client.chat.update({
+      channel,
+      ts: loadingMsg.ts!,
+      text: chunks[0],
+    });
+
+    // 나머지 청크는 새 메시지로 전송
+    for (let i = 1; i < chunks.length; i++) {
+      await say({
+        text: chunks[i],
+        thread_ts: threadTs,
       });
-    } else {
-      // 긴 답변: 분할해서 전송
-      const chunks = splitMessage(answer, MAX_LENGTH);
-
-      // 첫 번째 청크로 로딩 메시지 업데이트
-      await client.chat.update({
-        channel,
-        ts: loadingMsg.ts!,
-        text: chunks[0],
-      });
-
-      // 나머지 청크는 새 메시지로 전송
-      for (let i = 1; i < chunks.length; i++) {
-        await say({
-          text: chunks[i],
-          thread_ts: threadTs,
-        });
-      }
     }
 
-    console.log(`[RTB] 질문: ${question.substring(0, 50)}... (${answer.length}자)`);
+    console.log(`[RTB] 질문: ${question.substring(0, 50)}...`);
   } catch (error) {
     console.error('[RTB] 오류:', error);
 
