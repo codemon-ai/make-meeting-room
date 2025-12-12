@@ -10,6 +10,7 @@ import {
   formatHelpMessage,
   formatScheduleSuccess,
   formatScheduleError,
+  convertMarkdownToSlack,
 } from './services/slack-format.js';
 import { SLACK_CONFIG, validateConfig, TARGET_ROOMS } from './config.js';
 import {
@@ -39,7 +40,7 @@ gw.setHeadless(true);
  * 명령어 파싱 결과 타입
  */
 interface ParsedCommand {
-  type: 'check' | 'reserve' | 'schedule' | 'help' | 'rtb' | 'unknown';
+  type: 'check' | 'reserve' | 'schedule' | 'help' | 'rtb' | 'meeting_notes' | 'unknown';
   date?: string;
   time?: string;
   room?: string;
@@ -47,6 +48,8 @@ interface ParsedCommand {
   title?: string;
   attendeeIds?: string[]; // Slack 사용자 ID 배열
   question?: string; // RTB 질문 내용
+  meetingNotesAction?: 'list' | 'search' | 'detail'; // 회의록 액션
+  meetingNotesQuery?: string; // 검색어 또는 ID
   error?: string;
 }
 
@@ -115,6 +118,28 @@ function parseCommand(text: string): ParsedCommand {
       const errorMsg = err instanceof Error ? err.message : '입력 형식 오류';
       return { type: 'schedule', error: errorMsg };
     }
+  }
+
+  // 회의록 명령어 파싱
+  // 형식: 회의록 목록 | 회의록 검색 [키워드] | 회의록 [ID]
+  if (cleanText.includes('회의록')) {
+    const listMatch = cleanText.match(/회의록\s+목록/i);
+    if (listMatch) {
+      return { type: 'meeting_notes', meetingNotesAction: 'list' };
+    }
+
+    const searchMatch = cleanText.match(/회의록\s+검색\s+(.+)/i);
+    if (searchMatch) {
+      return { type: 'meeting_notes', meetingNotesAction: 'search', meetingNotesQuery: searchMatch[1].trim() };
+    }
+
+    const detailMatch = cleanText.match(/회의록\s+(\d+)/i);
+    if (detailMatch) {
+      return { type: 'meeting_notes', meetingNotesAction: 'detail', meetingNotesQuery: detailMatch[1] };
+    }
+
+    // "회의록"만 입력한 경우 목록 표시
+    return { type: 'meeting_notes', meetingNotesAction: 'list' };
   }
 
   // "회의실" 또는 "일정" 키워드가 없으면 RTB 질문으로 처리
@@ -297,6 +322,19 @@ app.event('app_mention', async ({ event, client, say }) => {
       client,
       say,
       command.question
+    );
+    return;
+  }
+
+  // 회의록 명령
+  if (command.type === 'meeting_notes' && command.meetingNotesAction) {
+    await handleMeetingNotes(
+      event.channel,
+      threadTs,
+      client,
+      say,
+      command.meetingNotesAction,
+      command.meetingNotesQuery
     );
     return;
   }
@@ -583,7 +621,8 @@ async function handleRTBQuestion(
       }
     );
 
-    const answer = response.data?.answer || '답변을 생성할 수 없습니다.';
+    const rawAnswer = response.data?.answer || '답변을 생성할 수 없습니다.';
+    const answer = convertMarkdownToSlack(rawAnswer);
 
     // Slack 메시지 길이 제한 (500자씩 분할하여 빠르게 전송)
     const MAX_LENGTH = 500;
@@ -614,6 +653,112 @@ async function handleRTBQuestion(
     const errorMessage = axios.isAxiosError(error)
       ? `❌ RTB 답변 생성 실패 (${error.response?.status || 'timeout'})`
       : '❌ RTB 답변 생성 중 오류가 발생했습니다.';
+
+    await client.chat.update({
+      channel,
+      ts: loadingMsg.ts!,
+      text: errorMessage,
+    });
+  }
+}
+
+/**
+ * 회의록 핸들러
+ * n8n webhook을 통해 회의록 목록/검색/상세 조회
+ */
+async function handleMeetingNotes(
+  channel: string,
+  threadTs: string,
+  client: typeof app.client,
+  say: (args: { text: string; thread_ts: string }) => Promise<{ ts?: string }>,
+  action: 'list' | 'search' | 'detail',
+  query?: string
+) {
+  const loadingMsg = await say({
+    text: action === 'search' ? `🔍 "${query}" 검색 중...` : '📋 회의록 조회 중...',
+    thread_ts: threadTs,
+  });
+
+  try {
+    let responseText = '';
+
+    if (action === 'list') {
+      // 목록 조회
+      const response = await axios.get('http://localhost:5678/webhook/meeting-notes-list', {
+        timeout: 30000,
+      });
+
+      const notes = response.data?.data || [];
+      if (notes.length === 0) {
+        responseText = '📋 저장된 회의록이 없습니다.';
+      } else {
+        responseText = '*📋 최근 회의록*\n\n';
+        for (const note of notes.slice(0, 10)) {
+          const dateStr = note.meeting_date || new Date(note.created_at).toLocaleDateString('ko-KR');
+          responseText += `• *[${note.id}]* ${note.title || '제목 없음'} (${note.type}) - ${dateStr}\n`;
+        }
+        responseText += '\n💡 상세 조회: `@봇 회의록 [ID]`';
+      }
+    } else if (action === 'search' && query) {
+      // 벡터 검색
+      const response = await axios.post(
+        'http://localhost:5678/webhook/meeting-notes-search',
+        { query },
+        { timeout: 30000, headers: { 'Content-Type': 'application/json' } }
+      );
+
+      const results = response.data?.results || [];
+      if (results.length === 0) {
+        responseText = `🔍 "${query}"에 대한 검색 결과가 없습니다.`;
+      } else {
+        responseText = `*🔍 "${query}" 검색 결과*\n\n`;
+        for (const r of results.slice(0, 5)) {
+          const score = (r.score * 100).toFixed(1);
+          responseText += `• *[${r.payload.postgres_id}]* ${r.payload.title || '제목 없음'} (유사도: ${score}%)\n`;
+          if (r.payload.content) {
+            responseText += `  _${r.payload.content.substring(0, 100)}..._\n`;
+          }
+        }
+        responseText += '\n💡 상세 조회: `@봇 회의록 [ID]`';
+      }
+    } else if (action === 'detail' && query) {
+      // 단건 조회
+      const response = await axios.get(`http://localhost:5678/webhook/meeting-notes-detail?id=${query}`, {
+        timeout: 30000,
+      });
+
+      const note = response.data?.data;
+      if (!note) {
+        responseText = `❌ ID ${query}번 회의록을 찾을 수 없습니다.`;
+      } else {
+        const dateStr = note.meeting_date || new Date(note.created_at).toLocaleDateString('ko-KR');
+        responseText = `*📄 회의록 #${note.id}*\n\n`;
+        responseText += `*제목:* ${note.title || '제목 없음'}\n`;
+        responseText += `*유형:* ${note.type} | *출처:* ${note.source}\n`;
+        responseText += `*날짜:* ${dateStr}\n\n`;
+        responseText += `*내용:*\n${note.content || '(내용 없음)'}`;
+      }
+    }
+
+    // 메시지 분할 전송
+    const chunks = splitMessage(responseText, 500);
+    await client.chat.update({
+      channel,
+      ts: loadingMsg.ts!,
+      text: chunks[0],
+    });
+
+    for (let i = 1; i < chunks.length; i++) {
+      await say({ text: chunks[i], thread_ts: threadTs });
+    }
+
+    console.log(`[MeetingNotes] ${action}: ${query || 'list'}`);
+  } catch (error) {
+    console.error('[MeetingNotes] 오류:', error);
+
+    const errorMessage = axios.isAxiosError(error)
+      ? `❌ 회의록 조회 실패 (${error.response?.status || 'timeout'})`
+      : '❌ 회의록 조회 중 오류가 발생했습니다.';
 
     await client.chat.update({
       channel,

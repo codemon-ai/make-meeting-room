@@ -285,15 +285,154 @@ export function formatHelpMessage(): string {
     '*일정* (캘린더만, 회의실 없음)',
     '`@봇 일정 251210 1000 1 "주간 회의" @user1 @user2`',
     '',
+    '*📋 회의록*',
+    '`@봇 회의록` 또는 `@봇 회의록 목록` - 최근 회의록',
+    '`@봇 회의록 검색 [키워드]` - 벡터 검색',
+    '`@봇 회의록 [ID]` - 상세 조회',
+    '',
     '*📚 RTB 문서 질문*',
     '`@봇 빌딩이란?` - RTB 용어 질문',
     '`@봇 매물 테이블 구조 알려줘` - 테이블/API 질문',
     '`@봇 딜 상태 종류가 뭐야?` - 비즈니스 로직 질문',
     '',
-    '💡 "회의실", "일정" 키워드 없이 질문하면 RTB 문서 기반으로 답변합니다.',
+    '💡 "회의실", "일정", "회의록" 키워드 없이 질문하면 RTB 문서 기반으로 답변합니다.',
     '',
     '*러닝타임*: 0.5(30분), 1(1시간), 1.5(1시간30분), 2(2시간)...',
     '*시간 형식*: 4자리 (0930, 1000, 1430)',
     '*날짜 형식*: 6자리 (251210), 슬래시(25/12/10) 또는 오늘/내일',
   ].join('\n');
+}
+
+/**
+ * 마크다운 테이블을 슬랙 텍스트로 변환 (수평 나열 형식)
+ *
+ * | 시간 | 배치명 | 목적 |
+ * |------|--------|------|
+ * | 03:00 | DeleteBounced | 삭제 |
+ *
+ * → *시간* • *배치명* • *목적*
+ *   03:00 • DeleteBounced • 삭제
+ */
+function convertTableToSlack(text: string): string {
+  const lines = text.split('\n');
+  const result: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // 테이블 헤더 감지 (| col1 | col2 | 형식)
+    if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+      // 테이블 시작
+      const tableLines: string[] = [];
+
+      // 테이블 전체 수집
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+
+      // 테이블 변환
+      const converted = parseAndConvertTable(tableLines);
+      result.push(...converted);
+    } else {
+      result.push(line);
+      i++;
+    }
+  }
+
+  return result.join('\n');
+}
+
+/**
+ * 테이블 라인 배열을 파싱하여 슬랙 형식으로 변환
+ */
+function parseAndConvertTable(tableLines: string[]): string[] {
+  if (tableLines.length === 0) return [];
+
+  const result: string[] = [];
+
+  for (let i = 0; i < tableLines.length; i++) {
+    const line = tableLines[i].trim();
+
+    // 구분선 제거 (|---|---|)
+    if (/^\|[\s\-:|]+\|$/.test(line)) {
+      continue;
+    }
+
+    // 셀 파싱
+    const cells = line
+      .split('|')
+      .slice(1, -1) // 앞뒤 빈 문자열 제거
+      .map((cell) => cell.trim());
+
+    if (cells.length === 0) continue;
+
+    // 첫 번째 행(헤더)은 볼드 처리
+    if (i === 0) {
+      const headerCells = cells.map((cell) => `*${cell}*`);
+      result.push(headerCells.join(' • '));
+    } else {
+      result.push(cells.join(' • '));
+    }
+  }
+
+  return result;
+}
+
+/**
+ * 마크다운을 슬랙 mrkdwn 형식으로 변환
+ *
+ * 변환 규칙:
+ * - 헤더: # ## ### #### → *볼드*
+ * - 볼드: **text** → *text*
+ * - 이탤릭: _text_ → _text_ (동일)
+ * - 취소선: ~~text~~ → ~text~
+ * - 링크: [text](url) → <url|text>
+ * - 코드: `code` → `code` (동일)
+ * - 테이블: | col | → 수평 나열
+ */
+export function convertMarkdownToSlack(markdown: string): string {
+  let result = markdown;
+
+  // 1. 코드 블록 보호 (변환에서 제외)
+  const codeBlocks: string[] = [];
+  result = result.replace(/```[\s\S]*?```/g, (match) => {
+    codeBlocks.push(match);
+    return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+  });
+
+  // 2. 인라인 코드 보호
+  const inlineCodes: string[] = [];
+  result = result.replace(/`[^`]+`/g, (match) => {
+    inlineCodes.push(match);
+    return `__INLINE_CODE_${inlineCodes.length - 1}__`;
+  });
+
+  // 3. 테이블 처리 (먼저 처리해야 | 문자 손상 방지)
+  result = convertTableToSlack(result);
+
+  // 4. 헤더 변환: #### text → *text*
+  result = result.replace(/^#{1,6}\s+(.+)$/gm, '*$1*');
+
+  // 5. 볼드 변환: **text** → *text*
+  result = result.replace(/\*\*([^*]+)\*\*/g, '*$1*');
+
+  // 6. 취소선: ~~text~~ → ~text~
+  result = result.replace(/~~([^~]+)~~/g, '~$1~');
+
+  // 7. 링크 변환: [text](url) → <url|text>
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<$2|$1>');
+
+  // 8. 코드 블록 복원
+  codeBlocks.forEach((block, i) => {
+    result = result.replace(`__CODE_BLOCK_${i}__`, block);
+  });
+
+  // 9. 인라인 코드 복원
+  inlineCodes.forEach((code, i) => {
+    result = result.replace(`__INLINE_CODE_${i}__`, code);
+  });
+
+  return result;
 }

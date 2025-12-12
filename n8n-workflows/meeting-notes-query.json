@@ -1,0 +1,172 @@
+{
+  "name": "Meeting Notes Query",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "meeting-notes-list",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-list",
+      "name": "Webhook List",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, title, type, source, meeting_date, created_at FROM meeting_notes ORDER BY created_at DESC LIMIT 20",
+        "options": {}
+      },
+      "id": "postgres-list",
+      "name": "PostgreSQL - List",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [500, 200],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, data: $json }) }}",
+        "options": {}
+      },
+      "id": "response-list",
+      "name": "Response List",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [750, 200]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "meeting-notes-detail",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-detail",
+      "name": "Webhook Detail",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM meeting_notes WHERE id = $1",
+        "options": {
+          "queryParams": "={{ [$json.query.id] }}"
+        }
+      },
+      "id": "postgres-detail",
+      "name": "PostgreSQL - Detail",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [500, 400],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, data: $json[0] || null }) }}",
+        "options": {}
+      },
+      "id": "response-detail",
+      "name": "Response Detail",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [750, 400]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meeting-notes-search",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-search",
+      "name": "Webhook Search",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/embeddings",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'nomic-embed-text', prompt: $json.query }) }}",
+        "options": {}
+      },
+      "id": "ollama-search",
+      "name": "Ollama - Search Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:6333/collections/meeting_notes/points/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ vector: $json.embedding, limit: 10, with_payload: true }) }}",
+        "options": {}
+      },
+      "id": "qdrant-search",
+      "name": "Qdrant - Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 600]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, results: $json.result || [] }) }}",
+        "options": {}
+      },
+      "id": "response-search",
+      "name": "Response Search",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1000, 600]
+    }
+  ],
+  "connections": {
+    "Webhook List": {
+      "main": [[{ "node": "PostgreSQL - List", "type": "main", "index": 0 }]]
+    },
+    "PostgreSQL - List": {
+      "main": [[{ "node": "Response List", "type": "main", "index": 0 }]]
+    },
+    "Webhook Detail": {
+      "main": [[{ "node": "PostgreSQL - Detail", "type": "main", "index": 0 }]]
+    },
+    "PostgreSQL - Detail": {
+      "main": [[{ "node": "Response Detail", "type": "main", "index": 0 }]]
+    },
+    "Webhook Search": {
+      "main": [[{ "node": "Ollama - Search Embedding", "type": "main", "index": 0 }]]
+    },
+    "Ollama - Search Embedding": {
+      "main": [[{ "node": "Qdrant - Search", "type": "main", "index": 0 }]]
+    },
+    "Qdrant - Search": {
+      "main": [[{ "node": "Response Search", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

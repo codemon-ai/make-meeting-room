@@ -1,0 +1,95 @@
+{
+  "name": "Meeting Notes Storage",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meeting-notes",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO meeting_notes (title, content, meeting_date, type, source, parent_id, created_at) VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING id, title, type, source",
+        "options": {
+          "queryParams": "={{ [$json.title, $json.content, $json.meeting_date || null, $json.type || 'original', $json.source || 'api', $json.parent_id || null] }}"
+        }
+      },
+      "id": "postgres-1",
+      "name": "PostgreSQL - Save",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [500, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/embeddings",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'nomic-embed-text', prompt: $('Webhook').item.json.title + ' ' + $('Webhook').item.json.content }) }}",
+        "options": {}
+      },
+      "id": "ollama-1",
+      "name": "Ollama - Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "http://localhost:6333/collections/meeting_notes/points",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ points: [{ id: $('PostgreSQL - Save').item.json.id, vector: $json.embedding, payload: { title: $('Webhook').item.json.title, content: $('Webhook').item.json.content.substring(0, 500), meeting_date: $('Webhook').item.json.meeting_date, type: $('PostgreSQL - Save').item.json.type, source: $('PostgreSQL - Save').item.json.source, postgres_id: $('PostgreSQL - Save').item.json.id } }] }) }}",
+        "options": {}
+      },
+      "id": "qdrant-1",
+      "name": "Qdrant - Store",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, id: $('PostgreSQL - Save').item.json.id, title: $('PostgreSQL - Save').item.json.title, type: $('PostgreSQL - Save').item.json.type }) }}",
+        "options": {}
+      },
+      "id": "response-1",
+      "name": "Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "PostgreSQL - Save", "type": "main", "index": 0 }]]
+    },
+    "PostgreSQL - Save": {
+      "main": [[{ "node": "Ollama - Embedding", "type": "main", "index": 0 }]]
+    },
+    "Ollama - Embedding": {
+      "main": [[{ "node": "Qdrant - Store", "type": "main", "index": 0 }]]
+    },
+    "Qdrant - Store": {
+      "main": [[{ "node": "Response", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}
