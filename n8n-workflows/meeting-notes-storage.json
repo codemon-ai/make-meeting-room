@@ -37,7 +37,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:11434/api/embeddings",
+        "url": "http://ollama:11434/api/embeddings",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ model: 'nomic-embed-text', prompt: $('Webhook').item.json.title + ' ' + $('Webhook').item.json.content }) }}",
@@ -52,7 +52,7 @@
     {
       "parameters": {
         "method": "PUT",
-        "url": "http://localhost:6333/collections/meeting_notes/points",
+        "url": "http://qdrant:6333/collections/meeting_notes/points",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ points: [{ id: $('PostgreSQL - Save').item.json.id, vector: $json.embedding, payload: { title: $('Webhook').item.json.title, content: $('Webhook').item.json.content.substring(0, 500), meeting_date: $('Webhook').item.json.meeting_date, type: $('PostgreSQL - Save').item.json.type, source: $('PostgreSQL - Save').item.json.source, postgres_id: $('PostgreSQL - Save').item.json.id } }] }) }}",

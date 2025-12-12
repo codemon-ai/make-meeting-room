@@ -161,7 +161,7 @@ GOOGLE_CALENDAR_USER=yong150@rsquare.co.kr
 ## RTB RAG 질문 기능
 
 ### 개요
-"회의실", "일정" 키워드 없이 질문하면 RTB 문서 기반 RAG로 답변 생성.
+"회의실", "일정", "회의록" 키워드 없이 질문하면 RTB 문서 기반 RAG로 답변 생성.
 n8n webhook (`http://localhost:5678/webhook/rtb-assistant`)을 통해 처리.
 
 ### 명령어
@@ -173,13 +173,58 @@ n8n webhook (`http://localhost:5678/webhook/rtb-assistant`)을 통해 처리.
 
 ### 동작 방식
 1. Slack 멘션 수신
-2. "회의실", "일정" 키워드 없으면 RTB 질문으로 라우팅
+2. "회의실", "일정", "회의록" 키워드 없으면 RTB 질문으로 라우팅
 3. n8n RAG webhook 호출 (60초 타임아웃)
 4. 답변 메시지 업데이트
 
 ### 관련 파일
 - `src/slack-server.ts` - `handleRTBQuestion` 함수
 - `RTB_INTEGRATION.md` - 통합 가이드 문서
+
+## 회의록 저장/조회 시스템
+
+### 개요
+회의록을 PostgreSQL에 저장하고 Qdrant 벡터 DB로 의미 검색을 지원.
+Ollama (nomic-embed-text)로 임베딩 생성.
+
+### Slack 명령어
+```
+@봇 회의록                     # 최근 목록
+@봇 회의록 목록                 # 최근 목록
+@봇 회의록 검색 OKR             # 벡터 검색
+@봇 회의록 7                    # ID 7번 상세 조회
+```
+
+### API 엔드포인트
+| Endpoint | Method | 설명 |
+|----------|--------|------|
+| `/webhook/meeting-notes` | POST | 회의록 저장 |
+| `/webhook/meeting-notes-list` | GET | 목록 조회 |
+| `/webhook/meeting-notes-detail?id=N` | GET | 상세 조회 |
+| `/webhook/meeting-notes-search` | POST | 벡터 검색 |
+| `/webhook/meeting-notes-ui` | GET | 웹 UI |
+| `/webhook/meeting-notes-reindex` | POST | 전체 재색인 |
+
+### n8n 워크플로우
+- `n8n-workflows/meeting-notes-storage.json` - 저장 (PostgreSQL + Ollama + Qdrant)
+- `n8n-workflows/meeting-notes-query.json` - 조회/검색
+- `n8n-workflows/meeting-notes-ui.json` - 웹 UI
+- `n8n-workflows/meeting-notes-reindex.json` - 재색인
+
+### Docker 컨테이너 (222.235.28.15)
+- `postgres` - PostgreSQL (meeting_notes 테이블)
+- `ollama` - Ollama (nomic-embed-text 모델)
+- `qdrant` - Qdrant (meeting_notes 컬렉션)
+- `n8n` - n8n 워크플로우
+
+### 테스트
+```bash
+bash n8n-workflows/test-api.sh all      # 전체 테스트
+bash n8n-workflows/test-api.sh reindex  # 재색인
+```
+
+### 관련 문서
+- `docs/MEETING_NOTES_API.md` - API 개발자 가이드
 
 ## 예정된 작업
 

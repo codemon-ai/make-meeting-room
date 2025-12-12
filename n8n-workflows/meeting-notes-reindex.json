@@ -1,0 +1,113 @@
+{
+  "name": "Meeting Notes Reindex",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meeting-notes-reindex",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-reindex",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, title, content, meeting_date, type, source FROM meeting_notes ORDER BY id",
+        "options": {}
+      },
+      "id": "postgres-fetch",
+      "name": "PostgreSQL - Fetch All",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [500, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credential-id",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/embeddings",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'nomic-embed-text', prompt: $json.title + ' ' + $json.content }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "id": "ollama-embed",
+      "name": "Ollama - Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const item = items[i];\n  const embedding = item.json.embedding;\n  \n  // Get original data from PostgreSQL node\n  const pgItems = $('PostgreSQL - Fetch All').all();\n  const pgData = pgItems[i]?.json || {};\n  \n  results.push({\n    json: {\n      id: pgData.id,\n      vector: embedding,\n      payload: {\n        postgres_id: pgData.id,\n        title: pgData.title || '',\n        content: (pgData.content || '').substring(0, 500),\n        type: pgData.type || 'original',\n        source: pgData.source || 'manual',\n        meeting_date: pgData.meeting_date || null\n      }\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "code-prepare",
+      "name": "Prepare Points",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "http://qdrant:6333/collections/meeting_notes/points",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ points: $input.all().map(i => i.json) }) }}",
+        "options": {}
+      },
+      "id": "qdrant-upsert",
+      "name": "Qdrant - Upsert All",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Reindex completed', count: $('PostgreSQL - Fetch All').all().length }) }}",
+        "options": {}
+      },
+      "id": "response-reindex",
+      "name": "Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1500, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{ "node": "PostgreSQL - Fetch All", "type": "main", "index": 0 }]]
+    },
+    "PostgreSQL - Fetch All": {
+      "main": [[{ "node": "Ollama - Embedding", "type": "main", "index": 0 }]]
+    },
+    "Ollama - Embedding": {
+      "main": [[{ "node": "Prepare Points", "type": "main", "index": 0 }]]
+    },
+    "Prepare Points": {
+      "main": [[{ "node": "Qdrant - Upsert All", "type": "main", "index": 0 }]]
+    },
+    "Qdrant - Upsert All": {
+      "main": [[{ "node": "Response", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

@@ -105,7 +105,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:11434/api/embeddings",
+        "url": "http://ollama:11434/api/embeddings",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ model: 'nomic-embed-text', prompt: $json.query }) }}",
@@ -120,7 +120,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:6333/collections/meeting_notes/points/search",
+        "url": "http://qdrant:6333/collections/meeting_notes/points/search",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ vector: $json.embedding, limit: 10, with_payload: true }) }}",
