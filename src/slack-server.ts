@@ -142,8 +142,10 @@ function parseCommand(text: string): ParsedCommand {
     return { type: 'meeting_notes', meetingNotesAction: 'list' };
   }
 
-  // "회의실" 또는 "일정" 키워드가 없으면 RTB 질문으로 처리
-  if (!cleanText.includes('회의실') && !cleanText.includes('일정')) {
+  // "회의실" 키워드가 없고, "일정" 명령어 형식도 아니면 RTB 질문으로 처리
+  // "일정"이 포함되어도 "일정 251210 1000..." 형식이 아니면 일반 질문으로 취급
+  const isScheduleCommand = /^일정\s+\S+\s+\d{4}/.test(cleanText);
+  if (!cleanText.includes('회의실') && !isScheduleCommand) {
     const question = cleanText.trim();
     if (question.length > 0) {
       return { type: 'rtb', question };
