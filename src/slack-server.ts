@@ -585,14 +585,37 @@ async function handleRTBQuestion(
 
     const answer = response.data?.answer || '답변을 생성할 수 없습니다.';
 
-    // 답변 메시지로 업데이트
-    await client.chat.update({
-      channel,
-      ts: loadingMsg.ts!,
-      text: answer,
-    });
+    // Slack 메시지 길이 제한 (3000자로 안전하게)
+    const MAX_LENGTH = 3000;
 
-    console.log(`[RTB] 질문: ${question.substring(0, 50)}...`);
+    if (answer.length <= MAX_LENGTH) {
+      // 짧은 답변: 기존 메시지 업데이트
+      await client.chat.update({
+        channel,
+        ts: loadingMsg.ts!,
+        text: answer,
+      });
+    } else {
+      // 긴 답변: 분할해서 전송
+      const chunks = splitMessage(answer, MAX_LENGTH);
+
+      // 첫 번째 청크로 로딩 메시지 업데이트
+      await client.chat.update({
+        channel,
+        ts: loadingMsg.ts!,
+        text: chunks[0],
+      });
+
+      // 나머지 청크는 새 메시지로 전송
+      for (let i = 1; i < chunks.length; i++) {
+        await say({
+          text: chunks[i],
+          thread_ts: threadTs,
+        });
+      }
+    }
+
+    console.log(`[RTB] 질문: ${question.substring(0, 50)}... (${answer.length}자)`);
   } catch (error) {
     console.error('[RTB] 오류:', error);
 
@@ -606,6 +629,39 @@ async function handleRTBQuestion(
       text: errorMessage,
     });
   }
+}
+
+/**
+ * 긴 메시지를 적절한 위치에서 분할
+ */
+function splitMessage(text: string, maxLength: number): string[] {
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLength) {
+      chunks.push(remaining);
+      break;
+    }
+
+    // 줄바꿈 기준으로 자르기 시도
+    let splitIndex = remaining.lastIndexOf('\n', maxLength);
+
+    // 줄바꿈이 없으면 공백 기준
+    if (splitIndex === -1 || splitIndex < maxLength * 0.5) {
+      splitIndex = remaining.lastIndexOf(' ', maxLength);
+    }
+
+    // 공백도 없으면 강제로 자르기
+    if (splitIndex === -1 || splitIndex < maxLength * 0.5) {
+      splitIndex = maxLength;
+    }
+
+    chunks.push(remaining.substring(0, splitIndex).trim());
+    remaining = remaining.substring(splitIndex).trim();
+  }
+
+  return chunks;
 }
 
 /**

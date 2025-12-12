@@ -158,6 +158,29 @@ GOOGLE_CALENDAR_USER=yong150@rsquare.co.kr
 - `src/services/google-calendar.ts` - Calendar API 연동
 - `src/slack-server.ts` - 일정 명령어 파싱, @멘션 처리
 
+## RTB RAG 질문 기능
+
+### 개요
+"회의실", "일정" 키워드 없이 질문하면 RTB 문서 기반 RAG로 답변 생성.
+n8n webhook (`http://localhost:5678/webhook/rtb-assistant`)을 통해 처리.
+
+### 명령어
+```
+@봇 빌딩이란?                  # RTB 용어 질문
+@봇 매물 테이블 구조 알려줘     # 테이블/API 질문
+@봇 딜 상태 종류가 뭐야?        # 비즈니스 로직 질문
+```
+
+### 동작 방식
+1. Slack 멘션 수신
+2. "회의실", "일정" 키워드 없으면 RTB 질문으로 라우팅
+3. n8n RAG webhook 호출 (60초 타임아웃)
+4. 답변 메시지 업데이트
+
+### 관련 파일
+- `src/slack-server.ts` - `handleRTBQuestion` 함수
+- `RTB_INTEGRATION.md` - 통합 가이드 문서
+
 ## 예정된 작업
 
 ### Public 배포
