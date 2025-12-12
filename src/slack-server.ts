@@ -585,8 +585,8 @@ async function handleRTBQuestion(
 
     const answer = response.data?.answer || '답변을 생성할 수 없습니다.';
 
-    // Slack 메시지 길이 제한 (2000자로 안전하게)
-    const MAX_LENGTH = 2000;
+    // Slack 메시지 길이 제한 (500자씩 분할하여 빠르게 전송)
+    const MAX_LENGTH = 500;
 
     // 긴 답변: 분할해서 전송
     const chunks = splitMessage(answer, MAX_LENGTH);
