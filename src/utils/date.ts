@@ -24,6 +24,28 @@ export function parseDate(dateStr: string): string {
     return dayjs().add(1, 'day').format('YYYY-MM-DD');
   }
 
+  // 슬래시 형식 (YY/MM/DD or YYYY/MM/DD)
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      // YY/MM/DD → YYMMDD로 변환
+      if (year.length === 2) {
+        return parseShortDate(`${year}${month.padStart(2, '0')}${day.padStart(2, '0')}`);
+      }
+      // YYYY/MM/DD → YYYY-MM-DD로 변환
+      if (year.length === 4) {
+        const formatted = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+        const parsed = dayjs(formatted, 'YYYY-MM-DD', true);
+        if (!parsed.isValid()) {
+          throw new Error(`잘못된 날짜입니다: ${dateStr}`);
+        }
+        return parsed.format('YYYY-MM-DD');
+      }
+    }
+    throw new Error(`잘못된 날짜 형식입니다: ${dateStr}. YY/MM/DD 또는 YYYY/MM/DD 형식을 사용하세요.`);
+  }
+
   // 단축 형식 (YYMMDD): 251210 -> 2025-12-10
   if (/^\d{6}$/.test(dateStr)) {
     return parseShortDate(dateStr);

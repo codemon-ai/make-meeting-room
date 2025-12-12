@@ -72,7 +72,11 @@ function parseCommand(text: string): ParsedCommand {
   const attendeeIds = extractSlackMentions(text);
 
   // 봇 멘션 제거 (예: <@U12345> 회의실 ...)
-  const cleanText = text.replace(/<@[A-Z0-9]+>/gi, '').trim();
+  // Slack tel 링크 제거 (예: <tel:2512121300|251212 1300> → 251212 1300)
+  const cleanText = text
+    .replace(/<@[A-Z0-9]+>/gi, '')
+    .replace(/<tel:[^|]+\|([^>]+)>/gi, '$1')
+    .trim();
 
   // 도움말
   if (cleanText.includes('도움말') || cleanText.includes('사용법') || cleanText.includes('help') || cleanText.includes('?')) {
