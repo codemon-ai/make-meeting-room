@@ -1,4 +1,5 @@
 import { App, LogLevel } from '@slack/bolt';
+import axios from 'axios';
 import { getGroupwareBrowserService } from './services/groupware-browser.js';
 import { parseDate, formatDateDisplay, parseShortTime, calculateEndTime } from './utils/date.js';
 import {
@@ -38,13 +39,14 @@ gw.setHeadless(true);
  * 명령어 파싱 결과 타입
  */
 interface ParsedCommand {
-  type: 'check' | 'reserve' | 'schedule' | 'help' | 'unknown';
+  type: 'check' | 'reserve' | 'schedule' | 'help' | 'rtb' | 'unknown';
   date?: string;
   time?: string;
   room?: string;
   duration?: number;
   title?: string;
   attendeeIds?: string[]; // Slack 사용자 ID 배열
+  question?: string; // RTB 질문 내용
   error?: string;
 }
 
@@ -115,8 +117,12 @@ function parseCommand(text: string): ParsedCommand {
     }
   }
 
-  // "회의실" 또는 "일정" 키워드가 없으면 unknown
+  // "회의실" 또는 "일정" 키워드가 없으면 RTB 질문으로 처리
   if (!cleanText.includes('회의실') && !cleanText.includes('일정')) {
+    const question = cleanText.trim();
+    if (question.length > 0) {
+      return { type: 'rtb', question };
+    }
     return { type: 'unknown' };
   }
 
@@ -279,6 +285,18 @@ app.event('app_mention', async ({ event, client, say }) => {
       command.title,
       userEmail,
       command.attendeeIds || []
+    );
+    return;
+  }
+
+  // RTB 질문 명령
+  if (command.type === 'rtb' && command.question) {
+    await handleRTBQuestion(
+      event.channel,
+      threadTs,
+      client,
+      say,
+      command.question
     );
     return;
   }
@@ -533,6 +551,59 @@ async function handleSchedule(
       channel,
       ts: loadingMsg.ts!,
       text: formatScheduleError(errorMessage),
+    });
+  }
+}
+
+/**
+ * RTB RAG 질문 핸들러
+ * n8n webhook을 통해 Claude API로 질문 전달
+ */
+async function handleRTBQuestion(
+  channel: string,
+  threadTs: string,
+  client: typeof app.client,
+  say: (args: { text: string; thread_ts: string }) => Promise<{ ts?: string }>,
+  question: string
+) {
+  // 로딩 메시지
+  const loadingMsg = await say({
+    text: '🔍 RTB 문서에서 답변 생성 중...',
+    thread_ts: threadTs,
+  });
+
+  try {
+    // n8n RAG webhook 호출 (서버 내부 통신이므로 localhost 사용)
+    const response = await axios.post(
+      'http://localhost:5678/webhook/rtb-assistant',
+      { question },
+      {
+        timeout: 60000, // 60초 타임아웃
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+
+    const answer = response.data?.answer || '답변을 생성할 수 없습니다.';
+
+    // 답변 메시지로 업데이트
+    await client.chat.update({
+      channel,
+      ts: loadingMsg.ts!,
+      text: answer,
+    });
+
+    console.log(`[RTB] 질문: ${question.substring(0, 50)}...`);
+  } catch (error) {
+    console.error('[RTB] 오류:', error);
+
+    const errorMessage = axios.isAxiosError(error)
+      ? `❌ RTB 답변 생성 실패 (${error.response?.status || 'timeout'})`
+      : '❌ RTB 답변 생성 중 오류가 발생했습니다.';
+
+    await client.chat.update({
+      channel,
+      ts: loadingMsg.ts!,
+      text: errorMessage,
     });
   }
 }
